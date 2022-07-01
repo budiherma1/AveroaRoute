@@ -1,11 +1,11 @@
 
-const express = require('express')
+import express from 'express'
 const router = express.Router()
 
 class aveRoute {
 
 	constructor() {
-		this.router = router;
+		// this.router = router;
 		this.c_path = "/app/Controllers/";
 		this.m_path = "/app/Middleware/";
 		this.m_met = "handle";
@@ -104,9 +104,9 @@ class aveRoute {
 			midn += "], ";
 		}
 		
-		let route = `this.router.${ty}('${pref}${p}',${mid ? midn : ''} (req, res) => c.${ctm[1]}(req, res))`;
+		let route = `router.${ty}('${pref}${p}',${mid ? midn : ''} (req, res) => c.${ctm[1]}(req, res))`;
 		return eval(route);
 	}
 }
-
-module.exports = new aveRoute;
+export default new aveRoute;
+export {router};
