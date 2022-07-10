@@ -1,11 +1,11 @@
 
 import express from 'express'
+import { MiddlewareProvider } from '@averoa/providers';
 const router = express.Router()
 
 class aveRoute {
 
 	constructor() {
-		// this.router = router;
 		this.c_path = "/app/Controllers/";
 		this.m_path = "/app/Middleware/";
 		this.m_met = "handle";
@@ -93,18 +93,28 @@ class aveRoute {
 		let c = (await import(`./../../..${this.c_path}${ctm[0]}.js`)).default
 		let midd = [];
 		let midn = "";
+		let mid_beg = "";
+		let mid_end = "";
+		for (let aa in MiddlewareProvider.beginning()) {
+			mid_beg += ` (req, res, next) => MiddlewareProvider.beginning()[${aa}].handle(req, res, next),`;
+		}
+		for (let ee in MiddlewareProvider.end()) {
+			mid_end += ` (req, res, next) => MiddlewareProvider.end()[${ee}].handle(req, res, next),`;
+		}
+
 		if (mid) {
-			midn = "[";
+			midn = `[`;
+
 			for (let a in mid) {
 				midd.push(
 					(await import(`./../../..${this.m_path}${mid[a]}.js`)).default
 				)
-				midn += ` midd[${a}].${this.m_met},`;
+				midn += ` (req, res, next) => midd[${a}].${this.m_met}(req, res, next),`;
 			}
 			midn += "], ";
 		}
 		
-		let route = `router.${ty}('${pref}${p}',${mid ? midn : ''} (req, res) => c.${ctm[1]}(req, res))`;
+		let route = `router.${ty}('${pref}${p}',${mid_beg}${mid ? midn : ''}${mid_end} (req, res) => c.${ctm[1]}(req, res))`;
 		return eval(route);
 	}
 }
