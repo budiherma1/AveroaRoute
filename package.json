@@ -1,6 +1,6 @@
 {
   "name": "@averoa/routes",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "routes for averoajs",
   "main": "index.js",
   "type": "module",
