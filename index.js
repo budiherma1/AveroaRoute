@@ -2,7 +2,7 @@
 import express from 'express'
 import { MiddlewareProvider } from '@averoa/providers';
 const router = express.Router()
-import {Auth} from '@averoa/utilities';
+// import {Auth} from '@averoa/utilities';
 
 class aveRoute {
 
@@ -96,7 +96,7 @@ class aveRoute {
 		let midn = "";
 		let mid_beg = "";
 		let mid_end = "";
-		let aut = `(req, res, next) => {Auth.init(req); next();}, `;
+		// let aut = `(req, res, next) => {Auth.init(req); next();}, `;
 		for (let aa in MiddlewareProvider.beginning()) {
 			mid_beg += ` (req, res, next) => MiddlewareProvider.beginning()[${aa}].handle(req, res, next),`;
 		}
@@ -116,7 +116,9 @@ class aveRoute {
 			midn += "], ";
 		}
 		
-		let route = `router.${ty}('${pref}${p}',${aut}${mid_beg}${mid ? midn : ''}${mid_end} (req, res) => c.${ctm[1]}(req, res))`;
+		// let route = `router.${ty}('${pref}${p}',${aut}${mid_beg}${mid ? midn : ''}${mid_end} (req, res) => c.${ctm[1]}(req, res))`;
+		// let route = `router.${ty}('${pref}${p}',${aut}${mid_beg}${mid ? midn : ''}${mid_end} c.${ctm[1]})`;
+		let route = `router.${ty}('${pref}${p}',${mid_beg}${mid ? midn : ''}${mid_end} c.${ctm[1]})`;
 		return eval(route);
 	}
 }
