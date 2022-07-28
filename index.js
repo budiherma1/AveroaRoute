@@ -1,7 +1,6 @@
 
 import express from 'express'
 import { MiddlewareProvider } from '@averoa/providers';
-const router = express.Router()
 // import {Auth} from '@averoa/utilities';
 
 class aveRoute {
@@ -10,6 +9,11 @@ class aveRoute {
 		this.c_path = "/app/Controllers/";
 		this.m_path = "/app/Middleware/";
 		this.m_met = "handle";
+		this.router = express.Router();
+	}
+
+	static Router() {
+		return new this;
 	}
 
 	async config({controller, middleware}) {
@@ -118,9 +122,8 @@ class aveRoute {
 		
 		// let route = `router.${ty}('${pref}${p}',${aut}${mid_beg}${mid ? midn : ''}${mid_end} (req, res) => c.${ctm[1]}(req, res))`;
 		// let route = `router.${ty}('${pref}${p}',${aut}${mid_beg}${mid ? midn : ''}${mid_end} c.${ctm[1]})`;
-		let route = `router.${ty}('${pref}${p}',${mid_beg}${mid ? midn : ''}${mid_end} c.${ctm[1]})`;
+		let route = `this.router.${ty}('${pref}${p}',${mid_beg}${mid ? midn : ''}${mid_end} c.${ctm[1]})`;
 		return eval(route);
 	}
 }
-export default new aveRoute;
-export {router};
+export default aveRoute;
