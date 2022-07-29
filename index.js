@@ -13,6 +13,7 @@ class aveRoute {
 	}
 
 	static Router() {
+		console.log(this)
 		return new this;
 	}
 
@@ -126,4 +127,4 @@ class aveRoute {
 		return eval(route);
 	}
 }
-export default aveRoute;
+export default aveRoute.Router.bind(aveRoute);
