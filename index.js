@@ -13,7 +13,6 @@ class aveRoute {
 	}
 
 	static Router() {
-		console.log(this)
 		return new this;
 	}
 
