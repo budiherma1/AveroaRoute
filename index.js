@@ -1,6 +1,7 @@
 
 import express from 'express'
 import { MiddlewareProvider } from '@averoa/providers';
+import Multer from 'multer';
 // import {Auth} from '@averoa/utilities';
 
 class aveRoute {
@@ -8,6 +9,7 @@ class aveRoute {
 	constructor() {
 		this.c_path = "/app/Controllers/";
 		this.m_path = "/app/Middleware/";
+		this.mod_path = "/app/Models/";
 		this.m_met = "handle";
 		this.router = express.Router();
 	}
@@ -30,6 +32,11 @@ class aveRoute {
 		return this.proceed('post', pt, ct, mid);
 	}
 
+	async postForm(pt, ct, mid) {
+		const multer = Multer();
+		return this.proceed('post', pt, ct, mid, {multer: multer.any()});
+	}
+
 	async put(pt, ct, mid) {
 		return this.proceed('put', pt, ct, mid);
 	}
@@ -40,6 +47,10 @@ class aveRoute {
 
 	async patch(pt, ct, mid) {
 		return this.proceed('patch', pt, ct, mid);
+	}
+	async patchForm(pt, ct, mid) {
+		const multer = Multer();
+		return this.proceed('patch', pt, ct, mid, {multer: multer.any()});
 	}
 
 	async match(rt, pt, ct, mid) {
@@ -61,6 +72,18 @@ class aveRoute {
 		cb();
 		this.mid = '';
 	}
+
+	async set(vmodel = '', pref, cb) {
+		this.vmodel = vmodel;
+		this.prefix(pref, cb)
+		this.vmodel = '';
+	}
+
+	// async set({model, path}, cb) {
+	// 	this.vmodel = model;
+	// 	this.prefix(path, cb)
+	// 	this.vmodel = '';
+	// }
 
 	async prefix(pref, cb) {
 		this.pref = ('/' + pref).replace('//', '/');
@@ -86,13 +109,37 @@ class aveRoute {
 		}
 	}
 
-	async proceed(ty, pt, ct, mid) {
+	async proceed(ty, pt, ct, mid, additional) {
 		let p = ('/' + pt).replace('//', '/');
 		let ctm = ct.split('@');
 		let pref = this.pref ?? '';
+		let multer = additional?.multer === undefined ? '' : 'additional.multer, ';
 
 		if (this.mid) {
 			mid = this.mid;
+		}
+		let vmodel = '';
+		let model = ''
+		if (this.vmodel) {
+			model = (await import(`./../../..${this.mod_path}${this.vmodel}.js`)).default
+			if (['post', 'patch'].includes(ty)) {
+
+				let sParams = '';
+
+				if (multer) {
+					sParams = ", {type: 'multipart'}";
+				}
+
+				if (ty == 'post') {
+					sParams = ", {type: 'multipart', post: true}"
+				}
+
+				vmodel = `(req, res, next) => model.checkParamId.call(model, req, res, next), (req, res, next) => model.sanitizeRequest.call(model, req, res, next${sParams}), (req, res, next) => model.validationRouter.call(model, req, res, next${sParams}), (req, res, next) => model.mapRequest.call(model, req, res, next${sParams}),`;
+			}
+
+			if (ty == 'get') {
+				vmodel = `(req, res, next) => model.checkParamId.call(model, req, res, next), (req, res, next) => model.mapRequest.call(model, req, res, next), `;
+			}
 		}
 
 		let c = (await import(`./../../..${this.c_path}${ctm[0]}.js`)).default
@@ -122,7 +169,7 @@ class aveRoute {
 		
 		// let route = `router.${ty}('${pref}${p}',${aut}${mid_beg}${mid ? midn : ''}${mid_end} (req, res) => c.${ctm[1]}(req, res))`;
 		// let route = `router.${ty}('${pref}${p}',${aut}${mid_beg}${mid ? midn : ''}${mid_end} c.${ctm[1]})`;
-		let route = `this.router.${ty}('${pref}${p}',${mid_beg}${mid ? midn : ''}${mid_end} c.${ctm[1]})`;
+		let route = `this.router.${ty}('${pref}${p}',${multer}${mid_beg}${mid ? midn : ''}${mid_end} ${vmodel} c.${ctm[1]})`;
 		return eval(route);
 	}
 }
