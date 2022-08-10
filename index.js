@@ -41,6 +41,11 @@ class aveRoute {
 		return this.proceed('put', pt, ct, mid);
 	}
 
+        async putForm(pt, ct, mid) {
+		const multer = Multer();
+		return this.proceed('put', pt, ct, mid, {multer: multer.any()});
+	}
+
 	async delete(pt, ct, mid) {
 		return this.proceed('delete', pt, ct, mid);
 	}
@@ -122,7 +127,7 @@ class aveRoute {
 		let model = ''
 		if (this.vmodel) {
 			model = (await import(`./../../..${this.mod_path}${this.vmodel}.js`)).default
-			if (['post', 'patch'].includes(ty)) {
+			if (['post', 'patch', 'put'].includes(ty)) {
 
 				let sParams = '';
 
