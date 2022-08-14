@@ -178,4 +178,4 @@ class aveRoute {
 		return eval(route);
 	}
 }
-export default aveRoute.Router;
+export default aveRoute.Router.bind(aveRoute);
