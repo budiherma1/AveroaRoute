@@ -84,6 +84,12 @@ class aveRoute {
 		this.vmodel = '';
 	}
 
+	async crud(vmodel = '', pref, cb) {
+		this.vmodel = vmodel;
+		this.prefix(pref, cb)
+		this.vmodel = '';
+	}
+
 	// async set({model, path}, cb) {
 	// 	this.vmodel = model;
 	// 	this.prefix(path, cb)
@@ -132,17 +138,17 @@ class aveRoute {
 				let sParams = '';
 
 				if (multer) {
-					sParams = ", {type: 'multipart'}";
+					sParams = `, {type: 'multipart', pref: '${pref.split('/').join('')}'}`;
 				}
 
 				if (ty == 'post') {
-					sParams = ", {type: 'multipart', post: true}"
+					sParams = `, {type: 'multipart', create: true, pref: '${pref.split('/').join('')}'}`
 				}
 
-				vmodel = `(req, res, next) => model.checkParamId.call(model, req, res, next), (req, res, next) => model.sanitizeRequest.call(model, req, res, next${sParams}), (req, res, next) => model.validationRouter.call(model, req, res, next${sParams}), (req, res, next) => model.mapRequest.call(model, req, res, next${sParams}),`;
+				vmodel = `(req, res, next) => model.checkParamId.call(model, req, res, next), (req, res, next) => model.validationRouter.call(model, req, res, next${sParams}), (req, res, next) => model.mapRequest.call(model, req, res, next${sParams}),`;
 			}
 
-			if (ty == 'get') {
+			if (['get', 'delete'].includes(ty)) {
 				vmodel = `(req, res, next) => model.checkParamId.call(model, req, res, next), (req, res, next) => model.mapRequest.call(model, req, res, next), `;
 			}
 		}
