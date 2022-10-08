@@ -180,7 +180,8 @@ class aveRoute {
 		
 		// let route = `router.${ty}('${pref}${p}',${aut}${mid_beg}${mid ? midn : ''}${mid_end} (req, res) => c.${ctm[1]}(req, res))`;
 		// let route = `router.${ty}('${pref}${p}',${aut}${mid_beg}${mid ? midn : ''}${mid_end} c.${ctm[1]})`;
-		let route = `this.router.${ty}('${pref}${p}',${multer}${mid_beg}${mid ? midn : ''}${mid_end} ${vmodel} c.${ctm[1]})`;
+		// let route = `this.router.${ty}('${pref}${p}',${multer}${mid_beg}${mid ? midn : ''}${mid_end} ${vmodel} c.${ctm[1]})`;
+		let route = `this.router.${ty}('${pref}${p}',${multer}${mid_beg}${mid ? midn : ''}${mid_end} ${vmodel} (req, res) => c.${ctm[1]}(req, res))`;
 		return eval(route);
 	}
 }
