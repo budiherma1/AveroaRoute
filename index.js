@@ -185,7 +185,7 @@ class aveRoute {
 			midn += "], ";
 		}
 
-		let route = `this.router.${ty}('${pref}${p}',${multer}${mid_beg}${mid ? midn : ''}${mid_end} ${vmodel} controller.${ctm[0]}.${ctm[1]})`;
+		let route = `this.router.${ty}('${pref}${p}',${multer}${mid_beg}${mid ? midn : ''}${mid_end} ${vmodel} (req, res, next) => controller.${ctm[0]}.${ctm[1]}(req, res, next))`;
 		this.allRoutes.push(route);
 	}
 
