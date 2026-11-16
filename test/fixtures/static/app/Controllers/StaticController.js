@@ -9,6 +9,10 @@ export default class StaticController {
   }
 
   static async index(req, res) {
-    res.json({ controller: this.label, constructed: StaticController.constructed, trace: req.trace ?? [] });
+    res.json({
+      controller: this.label,
+      constructed: StaticController.constructed,
+      trace: req.trace ?? [],
+    });
   }
 }

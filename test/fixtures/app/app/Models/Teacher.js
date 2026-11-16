@@ -1,12 +1,5 @@
 import trace from '../trace.js';
 
-// Fake model exposing the crud hooks the router calls.
-function record(model, hook, req, additional) {
-  if (!req.hooks) req.hooks = [];
-  req.hooks.push({ hook, additional, thisIsModel: model === Teacher });
-  trace(req, `model.${hook}`);
-}
-
 export default class Teacher {
   static checkParamId(req, res, next, additional) {
     record(this, 'checkParamId', req, additional);
@@ -25,4 +18,11 @@ export default class Teacher {
     record(this, 'mapRequest', req, additional);
     return next();
   }
+}
+
+// Fake model exposing the crud hooks the router calls.
+function record(model, hook, req, additional) {
+  if (!req.hooks) req.hooks = [];
+  req.hooks.push({ hook, additional, thisIsModel: model === Teacher });
+  trace(req, `model.${hook}`);
 }

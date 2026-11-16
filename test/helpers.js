@@ -19,7 +19,6 @@ export async function serve(router) {
   const app = express();
   app.use(express.json());
   app.use(await router.init());
-  // eslint-disable-next-line no-unused-vars
   app.use((err, req, res, next) => {
     res.status(err.status ?? 500).json({ error: err.message, code: err.code ?? null });
   });
@@ -29,7 +28,10 @@ export async function serve(router) {
   const { port } = server.address();
   return {
     url: `http://127.0.0.1:${port}`,
-    close: () => new Promise((resolve) => { server.closeAllConnections?.(); server.close(resolve); }),
+    close: () => new Promise((resolve) => {
+      server.closeAllConnections?.();
+      server.close(resolve);
+    }),
   };
 }
 

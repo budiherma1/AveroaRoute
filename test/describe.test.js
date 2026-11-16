@@ -53,7 +53,8 @@ test('describe() lists every verb, path, handler, middleware chain and crud mode
   const login = routes[1];
   assert.equal(login.path, '/v1/login');
   assert.equal(login.handler, 'EchoController@show');
-  // MiddlewareProvider beginning (a class instance) and end (an arrow function) wrap the scope/route middleware
+  // MiddlewareProvider beginning (a class instance) and end (an arrow function)
+  // wrap the scope/route middleware
   assert.deepEqual(login.middleware, ['GlobalBegin', 'TraceA', 'inlineCheck', 'anonymous']);
   assert.equal(login.middlewareEntries[2], inlineCheck);
   assert.equal(login.model, null);

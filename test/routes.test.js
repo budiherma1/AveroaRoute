@@ -300,9 +300,9 @@ describe('init() validation and lifecycle', () => {
     }
     // Scopes were popped: a later route has no prefix and no middleware.
     r.get('/after', 'EchoController@show');
-    const after = r.routes.find((x) => x.path === '/after');
-    assert.deepEqual(after.middleware, []);
-    assert.equal(after.model, null);
+    const afterRoute = r.routes.find((x) => x.path === '/after');
+    assert.deepEqual(afterRoute.middleware, []);
+    assert.equal(afterRoute.model, null);
     // Sync callbacks (and non-promise return values) are still fine.
     r.prefix('ok', () => r.get('/x', 'EchoController@show'));
     assert.ok(r.routes.some((x) => x.path === '/ok/x'));
@@ -526,7 +526,9 @@ describe('3.0.1 fixes', () => {
   test('R-b: error-handling middleware (err, req, res, next) in a middleware array stays an error handler', async () => {
     const r = Router();
     const fail = (req, res, next) => next(Object.assign(new Error('nope'), { status: 403 }));
-    const asJson = (tag) => (err, req, res, next) => res.status(err.status).json({ handledBy: tag, error: err.message });
+    const asJson = (tag) => (err, req, res, next) => res
+      .status(err.status)
+      .json({ handledBy: tag, error: err.message });
     const handlerObject = { handle(err, req, res, next) { res.status(err.status).json({ handledBy: 'object', error: err.message }); } };
     class HandlerClass {
       handle(err, req, res, next) { res.status(err.status).json({ handledBy: 'class', error: err.message }); }
@@ -563,7 +565,10 @@ describe('3.0.1 fixes', () => {
     const r = Router();
     r.prefix('posts', () => r.get('/:id?', 'EchoController@show'));
     await assert.rejects(r.init(), (err) => {
-      assert.match(err.message, /^\[@averoa\/routes\] route GET \/posts\/:id\? \(EchoController@show\): invalid path/);
+      assert.match(
+        err.message,
+        /^\[@averoa\/routes\] route GET \/posts\/:id\? \(EchoController@show\): invalid path/,
+      );
       assert.ok(err.cause instanceof Error);
       assert.match(err.cause.message, /Unexpected \?/);
       assert.ok(err.message.includes(err.cause.message));
@@ -571,7 +576,8 @@ describe('3.0.1 fixes', () => {
     });
 
     const f = Router();
-    f.get('/files/*', function listFiles(req, res) { res.end(); });
+    const listFiles = (req, res) => { res.end(); };
+    f.get('/files/*', listFiles);
     await assert.rejects(f.init(), /route GET \/files\/\* \(function listFiles\): invalid path/);
   });
 

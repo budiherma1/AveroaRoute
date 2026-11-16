@@ -76,7 +76,10 @@ function normalizePath(p) {
   return out;
 }
 
-/** Turn a configured folder ('app/Controllers', '/app/Controllers/') into an app-relative folder. */
+/**
+ * Turn a configured folder ('app/Controllers', '/app/Controllers/') into an
+ * app-relative folder.
+ */
 function normalizeFolder(p) {
   return String(p).replace(/^\/+|\/+$/g, '');
 }
@@ -286,11 +289,15 @@ export class AveroaRouter {
    * Every key is optional.
    *
    * @param {object} [options]
-   * @param {{path?: string}} [options.controller]  folder of controllers (default 'app/Controllers')
-   * @param {{path?: string, method?: string}} [options.middleware]  folder + method name (default 'app/Middleware', 'handle')
-   * @param {{path?: string}} [options.model]  folder of models used by crud() (default 'app/Models')
-   * @param {{limits?: object}} [options.upload]  multer limits for *Form routes (fileSize, files, fields,
-   *   fieldSize, parts, ...); wins over env UPLOAD_MAX_FILE_SIZE / UPLOAD_MAX_FILES and DEFAULT_UPLOAD_LIMITS
+   * @param {{path?: string}} [options.controller]  folder of controllers
+   *   (default 'app/Controllers')
+   * @param {{path?: string, method?: string}} [options.middleware]  folder + method name
+   *   (default 'app/Middleware', 'handle')
+   * @param {{path?: string}} [options.model]  folder of models used by crud()
+   *   (default 'app/Models')
+   * @param {{limits?: object}} [options.upload]  multer limits for *Form routes (fileSize,
+   *   files, fields, fieldSize, parts, ...); wins over env UPLOAD_MAX_FILE_SIZE /
+   *   UPLOAD_MAX_FILES and DEFAULT_UPLOAD_LIMITS
    */
   config({ controller, middleware, model, upload } = {}) {
     if (controller?.path) this.paths.controller = normalizeFolder(controller.path);
@@ -364,7 +371,8 @@ export class AveroaRouter {
    * of app/Models/<model>.js to every route registered inside `cb`.
    */
   crud(model, pref, cb) {
-    if (typeof pref === 'function') { cb = pref; pref = ''; }
+    // crud(model, cb): no prefix
+    if (typeof pref === 'function') return this.scope({ model, prefix: '' }, pref);
     return this.scope({ model, prefix: pref }, cb);
   }
 
@@ -385,7 +393,9 @@ export class AveroaRouter {
     const hasModel = typeof model === 'string' && model !== '';
 
     if (hasPrefix) this.prefixStack.push(String(prefix));
-    if (hasMiddleware) this.middlewareStack.push(Array.isArray(middleware) ? middleware : [middleware]);
+    if (hasMiddleware) {
+      this.middlewareStack.push(Array.isArray(middleware) ? middleware : [middleware]);
+    }
     if (hasModel) this.modelStack.push(model);
     let result;
     try {
@@ -456,7 +466,8 @@ export class AveroaRouter {
   /**
    * Attach API documentation to the route defined just before:
    *
-   *   router.post('/auth/login', 'AuthController@login').doc({ summary: 'Log in', tags: ['Auth'] });
+   *   router.post('/auth/login', 'AuthController@login')
+   *     .doc({ summary: 'Log in', tags: ['Auth'] });
    *
    * The object is stored as is (several calls are merged) and returned by
    * describe(); @averoa/core reads `summary`, `description`, `tags`,
@@ -485,7 +496,8 @@ export class AveroaRouter {
    *   method: string, path: string, openapiPath: string,
    *   params: Array<{ name: string, wildcard: boolean }>,
    *   handler: string, middleware: string[], middlewareEntries: Array<string|Function|object>,
-   *   model: string|null, modelClass: Function|null, hooks: string[], form: boolean, doc: object|null
+   *   model: string|null, modelClass: Function|null, hooks: string[], form: boolean,
+   *   doc: object|null
    * }>}
    */
   describe() {
@@ -537,7 +549,9 @@ export class AveroaRouter {
         middleware.push(await this.resolveMiddleware(m, route.label));
       }
       const controller = await this.resolveHandler(route.handler, route.label);
-      const model = route.model ? await this.resolveModel(route.model, route.label, route.verbs) : null;
+      const model = route.model
+        ? await this.resolveModel(route.model, route.label, route.verbs)
+        : null;
 
       for (const verb of route.verbs) {
         // Order: global beginning -> scope/route middleware -> global end ->
