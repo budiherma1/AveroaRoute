@@ -635,6 +635,10 @@ the fixture applications in `test/fixtures/`. The `pretest` script links `@avero
 Issues and pull requests are welcome at [github.com/budiherma1/AveroaRoute](https://github.com/budiherma1/AveroaRoute).
 Please run `npm test` before opening a pull request.
 
+GitHub Actions (`.github/workflows/ci.yml`) runs `npm test` on Node.js 20, 22 and 24 against the published sibling
+packages (dev dependencies). `.github/workflows/release.yml` publishes to npm when a `vX.Y.Z` tag matching
+`package.json` is pushed, after the same checks; it needs an `NPM_TOKEN` repository secret.
+
 ## Upgrading from 2.x
 
 3.0.0 is a rewrite: routes are no longer generated as source strings and run with `eval`. The complete list, with
