@@ -1,6 +1,6 @@
 {
   "name": "@averoa/routes",
-  "version": "3.0.1",
+  "version": "3.1.0",
   "description": "Laravel-style routes (controllers, middleware, groups, crud model hooks) for AveroaJS on express 5",
   "type": "module",
   "main": "index.js",
@@ -35,7 +35,7 @@
     "express": "^5.1.0"
   },
   "devDependencies": {
-    "@averoa/utilities": "^2.0.2",
+    "@averoa/utilities": "^2.1.0",
     "@eslint/js": "^10.0.1",
     "@stylistic/eslint-plugin": "^5.10.0",
     "@types/express": "^5.0.6",
