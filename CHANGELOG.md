@@ -1,5 +1,50 @@
 # Changelog
 
+## 3.0.1
+
+### Fixed
+
+- **Malformed multipart bodies are a 400.** On `postForm`/`putForm`/`patchForm`
+  routes, a parse error from the multipart parser (truncated form, missing
+  boundary, broken part header) was passed on as a plain `Error` without a
+  status, so it became a 500. It now gets `status` 400 and `expose: true`, like
+  the other multer errors. `LIMIT_FILE_SIZE` stays 413, and an error that
+  already has a `status` or `statusCode` keeps it.
+- **Error-handling middleware works in middleware arrays.** A
+  `(err, req, res, next)` function, or an object/class whose middleware method
+  takes four arguments, was wrapped as `(req, res, next)`, so Express called it
+  as normal middleware. Four-argument middleware now stays four-argument: it
+  is skipped without an error and called with the error after an earlier
+  middleware fails. This applies to scope, route and `MiddlewareProvider`
+  middleware.
+- **Invalid paths name the route.** An invalid Express path (for example
+  `/:id?`) made `init()` reject with Express's own error, which does not say
+  which route it came from. `init()` now rejects with
+  `route GET /:id? (Controller@method): invalid path "/:id?": <Express message>`
+  and the original error on `err.cause`.
+- **Inline middleware classes are instantiated once per router.** A class
+  passed in a middleware array was instantiated once for every route that
+  listed it. Instances are now cached per class for the whole router, shared
+  with the same class loaded from a middleware file.
+- **`init()` can be retried after a failure.** A rejected `init()` was cached:
+  every later call returned the same rejection and new routes could not be
+  added. Now, after a rejection, routes can be fixed or added and `init()`
+  builds a new router. A middleware/controller/model file whose import failed
+  is imported again on the retry. Once `init()` succeeds it is cached as
+  before, and adding routes while it runs or after it resolves still throws.
+- **`crud()`/`set()` only require the hooks that are used.** A model had to
+  define `checkParamId`, `validationRouter` and `mapRequest` even when the
+  scope only had `get`/`delete`/`all()` routes. Now each route requires only
+  the hooks of its verbs: `checkParamId` + `mapRequest` for `get`/`delete`,
+  all three for `post`/`put`/`patch` (and `*Form`), none for `all()`/`head`/
+  `options`. The model file must still exist.
+- `MiddlewareProvider.beginning()`/`end()` may now be `async`. Previously a returned promise crashed `init()` with `(list ?? []) is not iterable`; a non-array return value now rejects with a clear message.
+
+### Changed
+
+- **Node.js 20 or newer.** `engines.node` is now `>=20` (was `>=18.17`), matching
+  the peer dependency `@averoa/utilities@^2`, which already required Node.js 20.
+
 ## 3.0.0
 
 Rewrite. Routes are no longer built as source strings and run with `eval`;

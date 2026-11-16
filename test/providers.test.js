@@ -59,3 +59,18 @@ test('source uses no eval and no node_modules-relative app imports', () => {
   assert.doesNotMatch(src, /\.\/\.\.\/\.\.\//);
   assert.doesNotMatch(src, /@averoa\/providers/);
 });
+
+test('3.0.1: MiddlewareProvider.beginning()/end() may be async', async () => {
+  useFixture('asyncprovider');
+  const r = Router();
+  r.get('/', 'HomeController@index');
+  const srv = await serve(r);
+  try {
+    assert.deepEqual(await call(srv.url, 'GET', '/'), {
+      status: 200,
+      body: { fixture: 'asyncprovider', trace: ['async-begin', 'async-end'] },
+    });
+  } finally {
+    await srv.close();
+  }
+});

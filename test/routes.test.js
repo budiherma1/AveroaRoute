@@ -267,7 +267,7 @@ describe('init() validation and lifecycle', () => {
 
     const b = Router();
     b.crud('Broken', 'b', () => b.get('/', 'EchoController@show'));
-    await assert.rejects(b.init(), /model Broken .* is missing validationRouter, mapRequest/);
+    await assert.rejects(b.init(), /route GET \/b: model Broken .* is missing mapRequest$/);
   });
 
   test('malformed handler strings throw immediately', () => {
@@ -489,5 +489,184 @@ describe('upload limits', () => {
     } finally {
       await srv.close();
     }
+  });
+});
+
+describe('3.0.1 fixes', () => {
+  test('R-a: a malformed multipart body on a *Form route is a 400, not a 500', async () => {
+    const r = Router();
+    r.postForm('/up', 'EchoController@show');
+    r.putForm('/up', 'EchoController@show');
+    const srv = await serve(r);
+    try {
+      const send = (method, contentType, body) => fetch(`${srv.url}/up`, {
+        method, headers: { 'content-type': contentType }, body,
+      }).then(async (res) => ({ status: res.status, body: await res.json() }));
+
+      const truncated = await send('POST', 'multipart/form-data; boundary=xyz', '--xyz\r\nContent-Disposition: form-data; name="a"\r\n\r\nvalue');
+      assert.equal(truncated.status, 400);
+      assert.match(truncated.body.error, /Unexpected end of form/);
+
+      const noBoundary = await send('PUT', 'multipart/form-data', 'whatever');
+      assert.equal(noBoundary.status, 400);
+      assert.match(noBoundary.body.error, /Boundary not found/);
+
+      const badHeader = await send('POST', 'multipart/form-data; boundary=xyz', '--xyz\r\nno-colon-header\r\n\r\nv\r\n--xyz--\r\n');
+      assert.equal(badHeader.status, 400);
+
+      // Limits keep their status; a valid form still works.
+      const ok = new FormData();
+      ok.append('a', 'b');
+      assert.deepEqual((await call(srv.url, 'POST', '/up', { form: ok })).body.body, { a: 'b' });
+    } finally {
+      await srv.close();
+    }
+  });
+
+  test('R-b: error-handling middleware (err, req, res, next) in a middleware array stays an error handler', async () => {
+    const r = Router();
+    const fail = (req, res, next) => next(Object.assign(new Error('nope'), { status: 403 }));
+    const asJson = (tag) => (err, req, res, next) => res.status(err.status).json({ handledBy: tag, error: err.message });
+    const handlerObject = { handle(err, req, res, next) { res.status(err.status).json({ handledBy: 'object', error: err.message }); } };
+    class HandlerClass {
+      handle(err, req, res, next) { res.status(err.status).json({ handledBy: 'class', error: err.message }); }
+    }
+    const neverOnSuccess = (err, req, res, next) => res.status(500).json({ handledBy: 'should not run' });
+    const throwing = (err, req, res, next) => { throw new Error(`rethrown: ${err.message}`); };
+
+    r.get('/fn', 'EchoController@show', [fail, asJson('function')]);
+    r.get('/object', 'EchoController@show', [fail, handlerObject]);
+    r.get('/class', 'EchoController@show', [fail, HandlerClass]);
+    r.get('/ok', 'EchoController@show', [neverOnSuccess, 'TraceB']);
+    r.get('/throwing', 'EchoController@show', [fail, throwing]);
+    r.group({ middleware: [fail] }, () => {
+      r.get('/scoped', 'EchoController@show', [asJson('route after scope')]);
+    });
+    const srv = await serve(r);
+    try {
+      assert.deepEqual(await call(srv.url, 'GET', '/fn'), { status: 403, body: { handledBy: 'function', error: 'nope' } });
+      assert.deepEqual((await call(srv.url, 'GET', '/object')).body, { handledBy: 'object', error: 'nope' });
+      assert.deepEqual((await call(srv.url, 'GET', '/class')).body, { handledBy: 'class', error: 'nope' });
+      assert.deepEqual((await call(srv.url, 'GET', '/scoped')).body, { handledBy: 'route after scope', error: 'nope' });
+      const ok = await call(srv.url, 'GET', '/ok');
+      assert.equal(ok.status, 200, 'an error handler is skipped when there is no error');
+      assert.deepEqual(ok.body.trace, [BEGIN, 'TraceB', END]);
+      const thrown = await call(srv.url, 'GET', '/throwing');
+      assert.equal(thrown.status, 500);
+      assert.equal(thrown.body.error, 'rethrown: nope');
+    } finally {
+      await srv.close();
+    }
+  });
+
+  test('R-c: an invalid Express path rejects init() naming the route, with the original error as cause', async () => {
+    const r = Router();
+    r.prefix('posts', () => r.get('/:id?', 'EchoController@show'));
+    await assert.rejects(r.init(), (err) => {
+      assert.match(err.message, /^\[@averoa\/routes\] route GET \/posts\/:id\? \(EchoController@show\): invalid path/);
+      assert.ok(err.cause instanceof Error);
+      assert.match(err.cause.message, /Unexpected \?/);
+      assert.ok(err.message.includes(err.cause.message));
+      return true;
+    });
+
+    const f = Router();
+    f.get('/files/*', function listFiles(req, res) { res.end(); });
+    await assert.rejects(f.init(), /route GET \/files\/\* \(function listFiles\): invalid path/);
+  });
+
+  test('R-d: a class passed inline is instantiated once per router, not once per route', async () => {
+    let constructed = 0;
+    class Counted {
+      constructor() { constructed += 1; this.id = constructed; }
+
+      handle(req, res, next) { (req.trace ??= []).push(`counted#${this.id}`); next(); }
+    }
+    const r = Router();
+    r.get('/one', 'EchoController@show', [Counted]);
+    r.get('/two', 'EchoController@show', [Counted]);
+    r.middleware([Counted], () => r.get('/three', 'EchoController@show', [Counted]));
+    const srv = await serve(r);
+    try {
+      assert.equal(constructed, 1);
+      assert.deepEqual((await call(srv.url, 'GET', '/two')).body.trace, [BEGIN, 'counted#1', END]);
+      assert.deepEqual((await call(srv.url, 'GET', '/three')).body.trace, [BEGIN, 'counted#1', 'counted#1', END]);
+    } finally {
+      await srv.close();
+    }
+    // A second router gets its own instance.
+    const other = Router();
+    other.get('/x', 'EchoController@show', [Counted]);
+    await other.init();
+    assert.equal(constructed, 2);
+  });
+
+  test('R-e: after a failed init(), routes can be fixed or added and init() retried', async () => {
+    const r = Router();
+    r.get('/alt', 'AltController@ping');
+    await assert.rejects(r.init(), /controller file not found: .*AltController\.js/);
+    assert.equal(r.router, null);
+
+    // Adding routes is allowed again, and a config fix is picked up.
+    r.get('/alt2', 'AltController@ping');
+    r.config({ controller: { path: 'app/Alt' } });
+    const srv = await serve(r);
+    try {
+      assert.equal((await call(srv.url, 'GET', '/alt')).body.alt, true);
+      assert.equal((await call(srv.url, 'GET', '/alt2')).body.alt, true);
+    } finally {
+      await srv.close();
+    }
+    // Once init() has succeeded it is cached again and routes are locked.
+    assert.equal(await r.init(), r.router);
+    assert.throws(() => r.get('/late', 'AltController@ping'), /after init\(\)/);
+
+    // A route that is fixed in place also works on retry.
+    const p = Router();
+    p.get('/:id?', 'EchoController@show');
+    await assert.rejects(p.init(), /invalid path/);
+    p.routes[0].path = '{/:id}';
+    await p.init();
+  });
+
+  test('R-f: crud() only requires the model hooks used by each route verb', async () => {
+    const r = Router();
+    r.crud('ReadOnly', 'ro', () => {
+      r.get('/', 'EchoController@show');
+      r.delete('/:id', 'EchoController@show');
+      r.all('/any', 'EchoController@show');
+      r.match(['head', 'options'], '/meta', 'EchoController@show');
+    });
+    r.crud('Broken', 'broken', () => r.all('/', 'EchoController@show'));
+    const srv = await serve(r);
+    try {
+      assert.deepEqual((await call(srv.url, 'GET', '/ro')).body.trace,
+        [BEGIN, END, 'readonly.checkParamId', 'readonly.mapRequest']);
+      assert.deepEqual((await call(srv.url, 'DELETE', '/ro/1')).body.trace,
+        [BEGIN, END, 'readonly.checkParamId', 'readonly.mapRequest']);
+      assert.deepEqual((await call(srv.url, 'POST', '/ro/any')).body.trace, [BEGIN, END]);
+      assert.equal((await call(srv.url, 'OPTIONS', '/ro/meta')).status, 200);
+      assert.equal((await call(srv.url, 'GET', '/broken')).status, 200);
+    } finally {
+      await srv.close();
+    }
+
+    const w = Router();
+    w.crud('ReadOnly', 'ro', () => w.post('/', 'EchoController@show'));
+    await assert.rejects(w.init(), /route POST \/ro: model ReadOnly .* is missing validationRouter$/);
+
+    const m = Router();
+    m.crud('ReadOnly', 'ro', () => m.match(['get', 'put'], '/:id', 'EchoController@show'));
+    await assert.rejects(m.init(), /route GET\|PUT \/ro\/:id: model ReadOnly .* is missing validationRouter$/);
+
+    // The model file itself must still exist.
+    const missing = Router();
+    missing.crud('NoSuchModel', 'x', () => missing.all('/', 'EchoController@show'));
+    await assert.rejects(missing.init(), /model file not found: .*NoSuchModel\.js/);
+  });
+
+  test('R-g: engines require Node.js 20, like @averoa/utilities 2', async () => {
+    const { default: pkg } = await import('../package.json', { with: { type: 'json' } });
+    assert.equal(pkg.engines.node, '>=20');
   });
 });

@@ -47,6 +47,13 @@ const VERBS = new Set(['get', 'post', 'put', 'patch', 'delete', 'head', 'options
 
 const MODEL_HOOKS = ['checkParamId', 'validationRouter', 'mapRequest'];
 
+/** crud model hooks run for `verb`, in order (none for all/head/options). */
+function hooksFor(verb) {
+  if (WRITE_VERBS.has(verb)) return MODEL_HOOKS;
+  if (READ_VERBS.has(verb)) return ['checkParamId', 'mapRequest'];
+  return [];
+}
+
 /** True for `class X {}` (as opposed to a plain function). */
 function isClass(fn) {
   return typeof fn === 'function' && /^class[\s{]/.test(Function.prototype.toString.call(fn));
@@ -62,12 +69,6 @@ function hasStatic(fn, method) {
     && fn[method] !== Function.prototype[method];
 }
 
-/** A class/function export with a static `method` is used as is; other classes are instantiated. */
-function asTarget(exported, method) {
-  if (isClass(exported) && !hasStatic(exported, method)) return new exported();
-  return exported;
-}
-
 /** '/a//b/' -> '/a/b'; '' -> '/'. */
 function normalizePath(p) {
   let out = `/${p}`.replace(/\/{2,}/g, '/');
@@ -80,20 +81,44 @@ function normalizeFolder(p) {
   return String(p).replace(/^\/+|\/+$/g, '');
 }
 
+/** Calls fn(...args) so that a sync throw or an async rejection both reach next(err). */
+function invoke(fn, args, next) {
+  try {
+    const result = fn(...args);
+    if (result && typeof result.then === 'function') {
+      result.then(undefined, (err) => next(err ?? new Error('Route handler rejected without a reason')));
+    }
+  } catch (err) {
+    next(err);
+  }
+}
+
 /** Makes sure sync throws and async rejections of `fn` both reach next(err). */
 function wrap(fn) {
   const wrapped = function averoaHandler(req, res, next) {
-    try {
-      const result = fn(req, res, next);
-      if (result && typeof result.then === 'function') {
-        result.then(undefined, (err) => next(err ?? new Error('Route handler rejected without a reason')));
-      }
-    } catch (err) {
-      next(err);
-    }
+    invoke(fn, [req, res, next], next);
   };
   Object.defineProperty(wrapped, 'name', { value: fn.name || 'averoaHandler' });
   return wrapped;
+}
+
+/**
+ * Like wrap(), but keeps Express error handlers `(err, req, res, next)` as
+ * four-argument functions, so Express still calls them only with an error.
+ */
+function wrapMiddleware(fn) {
+  if (fn.length !== 4) return wrap(fn);
+  const wrapped = function averoaErrorHandler(err, req, res, next) {
+    invoke(fn, [err, req, res, next], next);
+  };
+  Object.defineProperty(wrapped, 'name', { value: fn.name || 'averoaErrorHandler' });
+  return wrapped;
+}
+
+/** 'UserController@show' | function name, for error messages. */
+function describeHandler(handler) {
+  if (typeof handler === 'string') return handler;
+  return handler.name ? `function ${handler.name}` : 'anonymous function';
 }
 
 /** Positive number from env `name` (e.g. UPLOAD_MAX_FILE_SIZE), or undefined. */
@@ -141,6 +166,7 @@ export class AveroaRouter {
     this.router = null;
     this.initPromise = null;
     this.moduleCache = new Map();
+    /** One instance per class per router (key: the class itself). */
     this.instanceCache = new Map();
   }
 
@@ -324,13 +350,21 @@ export class AveroaRouter {
 
   /**
    * Resolve everything and build the express.Router. Safe to call twice
-   * (returns the same router). Throws a clear Error when a controller,
-   * method, middleware or model cannot be found.
+   * (returns the same router). Rejects with a clear Error when a controller,
+   * method, middleware or model cannot be found, or a path is invalid; after
+   * a rejection, routes can be added again and init() retried.
    *
    * @returns {Promise<import('express').Router>}
    */
   init() {
-    if (!this.initPromise) this.initPromise = this.build();
+    if (!this.initPromise) {
+      // A failed init() is not cached: fix or add routes and call init() again.
+      const promise = this.build().catch((err) => {
+        if (this.initPromise === promise) this.initPromise = null;
+        throw err;
+      });
+      this.initPromise = promise;
+    }
     return this.initPromise;
   }
 
@@ -346,18 +380,27 @@ export class AveroaRouter {
         middleware.push(await this.resolveMiddleware(m, route.label));
       }
       const controller = await this.resolveHandler(route.handler, route.label);
-      const model = route.model ? await this.resolveModel(route.model, route.label) : null;
+      const model = route.model ? await this.resolveModel(route.model, route.label, route.verbs) : null;
 
       for (const verb of route.verbs) {
         // Order: global beginning -> scope/route middleware -> global end ->
         // multipart parsing -> crud model hooks -> controller. Multer runs only
         // after auth middleware let the request through (no unauthenticated
-        // uploads buffered in memory).
-        const chain = [...beginning, ...middleware, ...end];
-        if (route.form) chain.push(upload);
-        if (model) chain.push(...this.modelHooks(model, verb, route));
-        chain.push(controller);
-        router[verb](route.path, ...chain.map(wrap));
+        // uploads buffered in memory). Middleware keeps its arity, so an error
+        // handler (err, req, res, next) in a middleware array stays one.
+        const chain = [...beginning, ...middleware, ...end].map(wrapMiddleware);
+        if (route.form) chain.push(wrap(upload));
+        if (model) chain.push(...this.modelHooks(model, verb, route).map(wrap));
+        chain.push(wrap(controller));
+        try {
+          router[verb](route.path, ...chain);
+        } catch (cause) {
+          throw new Error(
+            `[@averoa/routes] route ${verb.toUpperCase()} ${route.path} (${describeHandler(route.handler)}): `
+            + `invalid path "${route.path}": ${cause.message}`,
+            { cause },
+          );
+        }
       }
     }
 
@@ -365,14 +408,19 @@ export class AveroaRouter {
     return router;
   }
 
-  /** @private one multer instance (memory storage) for every *Form route. */
+  /**
+   * @private one multer instance (memory storage) for every *Form route.
+   * MulterError LIMIT_FILE_SIZE -> 413; any other MulterError and every
+   * multipart parse error from busboy (malformed body, missing boundary,
+   * truncated form) -> 400. Errors that already carry a status keep it.
+   */
   createUpload() {
     const limits = resolveUploadLimits(this.uploadLimits);
     const any = multer({ storage: multer.memoryStorage(), limits }).any();
     return function averoaUpload(req, res, next) {
       any(req, res, (err) => {
-        if (err instanceof multer.MulterError && err.status === undefined) {
-          err.status = err.code === 'LIMIT_FILE_SIZE' ? 413 : 400;
+        if (err && typeof err === 'object' && err.status === undefined && err.statusCode === undefined) {
+          err.status = err instanceof multer.MulterError && err.code === 'LIMIT_FILE_SIZE' ? 413 : 400;
           err.expose = true;
         }
         next(err);
@@ -387,11 +435,7 @@ export class AveroaRouter {
       create: verb === 'post',
       pref: route.pref,
     };
-    let hooks = [];
-    if (WRITE_VERBS.has(verb)) hooks = ['checkParamId', 'validationRouter', 'mapRequest'];
-    else if (READ_VERBS.has(verb)) hooks = ['checkParamId', 'mapRequest'];
-
-    return hooks.map((hook) => {
+    return hooksFor(verb).map((hook) => {
       const fn = function modelHook(req, res, next) {
         return model[hook].call(model, req, res, next, { ...additional });
       };
@@ -408,6 +452,7 @@ export class AveroaRouter {
       throw new Error(`[@averoa/routes] route ${label}: ${what} file not found: ${abs}`);
     }
     const promise = import(pathToFileURL(abs).href).catch((cause) => {
+      this.moduleCache.delete(abs); // let a retried init() import it again
       throw new Error(`[@averoa/routes] route ${label}: failed to load ${what} ${abs}: ${cause.message}`, { cause });
     });
     this.moduleCache.set(abs, promise);
@@ -421,7 +466,7 @@ export class AveroaRouter {
     const [name, method] = handler.split('@');
     const file = path.posix.join(this.paths.controller, `${name}.js`);
     const mod = await this.load(file, 'controller', label);
-    const target = this.instantiate(file, mod.default ?? mod[name], method);
+    const target = this.instantiate(mod.default ?? mod[name], method);
     if (!target || typeof target[method] !== 'function') {
       throw new Error(`[@averoa/routes] route ${label}: method "${method}" not found on controller ${name} (${appPath(file)})`);
     }
@@ -433,14 +478,19 @@ export class AveroaRouter {
    * with a static `method` (used as is, `this` = the class, like 1.x), or a
    * class with an instance `method` (created once and cached).
    */
-  instantiate(file, exported, method) {
+  instantiate(exported, method) {
     if (typeof exported !== 'function') return exported;
     if (hasStatic(exported, method)) return exported;
     const looksLikeClass = isClass(exported)
       || (exported.prototype && typeof exported.prototype[method] === 'function');
     if (!looksLikeClass) return exported; // a plain function
-    if (!this.instanceCache.has(file)) this.instanceCache.set(file, new exported());
-    return this.instanceCache.get(file);
+    return this.instanceOf(exported);
+  }
+
+  /** @private the cached instance of `Class` for this router (created on first use). */
+  instanceOf(Class) {
+    if (!this.instanceCache.has(Class)) this.instanceCache.set(Class, new Class());
+    return this.instanceCache.get(Class);
   }
 
   /** @private middleware name | function | object with the middleware method -> function. */
@@ -448,13 +498,16 @@ export class AveroaRouter {
     if (typeof entry === 'string') {
       const file = path.posix.join(this.paths.middleware, `${entry}.js`);
       const mod = await this.load(file, 'middleware', label);
-      const fn = this.toMiddleware(this.instantiate(file, mod.default ?? mod[entry], method), method);
+      const fn = this.toMiddleware(this.instantiate(mod.default ?? mod[entry], method), method);
       if (!fn) {
         throw new Error(`[@averoa/routes] route ${label}: middleware ${entry} (${appPath(file)}) has no "${method}" method`);
       }
       return fn;
     }
-    const fn = this.toMiddleware(asTarget(entry, method), method);
+    // A class passed inline: static method -> the class itself; otherwise one
+    // cached instance per router, however many routes list it.
+    const target = isClass(entry) && !hasStatic(entry, method) ? this.instanceOf(entry) : entry;
+    const fn = this.toMiddleware(target, method);
     if (!fn) throw new TypeError(`[@averoa/routes] route ${label}: invalid middleware ${String(entry)}`);
     return fn;
   }
@@ -466,12 +519,17 @@ export class AveroaRouter {
     return null;
   }
 
-  /** @private app/Models/<name>.js default export with the crud hooks. */
-  async resolveModel(name, label) {
+  /**
+   * @private app/Models/<name>.js default export. Only the hooks used by the
+   * route's verbs are required (all()/head/options use none, get/delete use
+   * checkParamId + mapRequest).
+   */
+  async resolveModel(name, label, verbs) {
     const file = path.posix.join(this.paths.model, `${name}.js`);
     const mod = await this.load(file, 'model', label);
     const model = mod.default ?? mod[name];
-    const missing = MODEL_HOOKS.filter((h) => typeof model?.[h] !== 'function');
+    const used = new Set(verbs.flatMap(hooksFor));
+    const missing = MODEL_HOOKS.filter((h) => used.has(h) && typeof model?.[h] !== 'function');
     if (missing.length) {
       throw new Error(`[@averoa/routes] route ${label}: model ${name} (${appPath(file)}) is missing ${missing.join(', ')}`);
     }
@@ -480,7 +538,7 @@ export class AveroaRouter {
 
   /**
    * @private Global middleware from app/Providers/index.js `MiddlewareProvider`
-   * beginning()/end() (both optional, may return undefined). Resolved once.
+   * beginning()/end() (both optional, sync or async, may return undefined). Resolved once.
    */
   async resolveGlobalMiddleware() {
     const providers = await importApp('app/Providers/index.js', { optional: true });
@@ -490,7 +548,11 @@ export class AveroaRouter {
     }
 
     const collect = async (kind) => {
-      const list = typeof provider?.[kind] === 'function' ? provider[kind]() : undefined;
+      // beginning()/end() may be sync or async and may return undefined
+      const list = typeof provider?.[kind] === 'function' ? await provider[kind]() : undefined;
+      if (list != null && typeof list[Symbol.iterator] !== 'function') {
+        throw new Error(`[@averoa/routes] MiddlewareProvider.${kind}() must return an array (or nothing)`);
+      }
       const out = [];
       for (const entry of list ?? []) {
         out.push(await this.resolveMiddleware(entry, `MiddlewareProvider.${kind}()`, 'handle'));
