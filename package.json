@@ -28,6 +28,7 @@
     "express": "^5.1.0"
   },
   "devDependencies": {
+    "@averoa/utilities": "^2.0.2",
     "express": "^5.1.0"
   },
   "keywords": [
