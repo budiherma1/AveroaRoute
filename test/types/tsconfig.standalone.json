@@ -1,0 +1,7 @@
+{
+  // Only standalone.ts: proves index.d.ts compiles without @types/express and @types/node
+  // (express.ts pulls them into the main program through its express import).
+  "extends": "../../tsconfig.json",
+  "files": ["../../index.d.ts", "standalone.ts"],
+  "include": []
+}
