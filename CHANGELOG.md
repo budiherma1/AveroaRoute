@@ -13,12 +13,19 @@
   and every existing call keeps working.
 - **`toOpenApiPaths(path)`**: converts Express 5 paths (`:id`, `*splat`, `:"quoted"`, `{optional}` groups) to
   OpenAPI path templates.
+- **TypeScript declarations** (`index.d.ts`, wired through `"types"` and a `types` condition in `exports`) for the
+  whole public API: `Router()`, every route and scope method, `.doc()`, `describe()`, `init()`, `config()` and the
+  upload helpers. They need no `@types/express` or `@types/node`; `Router<Request, Response>()` opts in to typed
+  `req`/`res`. The JavaScript runtime is unchanged.
 
 ### Changed
 
 - **Removed the repository `.npmrc` (`legacy-peer-deps=true`).** `@averoa/utilities@^2` is published, so
   `npm install` now installs the peer dependency normally; the `pretest` shim only kicks in when it is missing.
   Development only; the published package is unchanged.
+- **Development: ESLint and type checks.** `npm run lint` (ESLint 10 flat config, the AveroaJS app's rules) and
+  `npm run typecheck` (`tsc` over `test/types/`) run in CI next to `npm test`. Changes made to satisfy the linter (line
+  wrapping, `crud(model, cb)` without reassigning parameters, renamed test locals) do not change behaviour.
 
 ## 3.0.1
 

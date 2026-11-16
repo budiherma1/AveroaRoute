@@ -38,5 +38,9 @@ jobs:
       # @averoa packages come from npm (devDependencies), at their published versions.
       - name: Install
         run: npm install --no-audit --no-fund
+      - name: Lint
+        run: npm run lint
+      - name: Typecheck
+        run: npm run typecheck
       - name: Test
         run: npm test

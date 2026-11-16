@@ -29,6 +29,7 @@
 - [Scopes](#scopes)
 - [Paths and Express 5 syntax](#paths-and-express-5-syntax)
 - [Route metadata and documentation](#route-metadata-and-documentation)
+- [TypeScript](#typescript)
 - [Testing](#testing)
 - [Upgrading from 2.x](#upgrading-from-2x)
 - [Related packages](#related-packages)
@@ -702,11 +703,36 @@ toOpenApiPaths('/files{/:name}');
 // [{ path: '/files', params: [] }, { path: '/files/{name}', params: [{ name: 'name', wildcard: false }] }]
 ```
 
+## TypeScript
+
+The package ships hand-written declarations (`index.d.ts`) for the whole API; the runtime is unchanged plain
+JavaScript. They are self-contained: no `@types/express` or `@types/node` is needed. Handler strings are checked as
+`'Controller@method'`, and a scope callback that returns a Promise (an `async` callback) is a type error.
+
+`req` and `res` are `any` by default. To type inline handlers with Express's types (from `@types/express`), pass
+them to `Router()`:
+
+```ts
+import Router, { type ErrorRequestHandler } from '@averoa/routes';
+import type { Request, Response } from 'express';
+
+const router = Router<Request, Response>();
+router.get('/:id', (req, res) => { res.json({ id: req.params.id }); });
+
+// annotate error handlers: an inline (err, req, res, next) lambda in a middleware array is not contextually typed
+const onError: ErrorRequestHandler = (err, req, res, next) => res.status(err.status ?? 500).end();
+```
+
+`init()` resolves to a structural `BuiltRouter` (a request handler with `stack`), which `app.use()` accepts; cast it
+to `import('express').Router` if you need the rest of the Express Router API.
+
 ## Testing
 
 ```bash
 npm install
-npm test
+npm test            # node --test
+npm run lint        # ESLint (eslint.config.js)
+npm run typecheck   # tsc against index.d.ts and the usage files in test/types/
 ```
 
 The suite uses the Node.js test runner (`node --test`) and starts real Express servers on ephemeral ports against
@@ -714,9 +740,9 @@ the fixture applications in `test/fixtures/`. The `pretest` script links `@avero
 `../AveroaUtilities` checkout (or `$AVEROA_UTILITIES_DIR`) when `@averoa/utilities` is not installed.
 
 Issues and pull requests are welcome at [github.com/budiherma1/AveroaRoute](https://github.com/budiherma1/AveroaRoute).
-Please run `npm test` before opening a pull request.
+Please run `npm test`, `npm run lint` and `npm run typecheck` before opening a pull request.
 
-GitHub Actions (`.github/workflows/ci.yml`) runs `npm test` on Node.js 20, 22 and 24 against the published sibling
+GitHub Actions (`.github/workflows/ci.yml`) runs `npm run lint`, `npm run typecheck` and `npm test` on Node.js 20, 22 and 24 against the published sibling
 packages (dev dependencies). `.github/workflows/release.yml` publishes to npm when a `vX.Y.Z` tag matching
 `package.json` is pushed, after the same checks; it needs an `NPM_TOKEN` repository secret.
 
