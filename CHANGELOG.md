@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- **Removed the repository `.npmrc` (`legacy-peer-deps=true`).** `@averoa/utilities@^2` is published, so
+  `npm install` now installs the peer dependency normally; the `pretest` shim only kicks in when it is missing.
+  Development only; the published package is unchanged.
+
 ## 3.0.1
 
 ### Fixed
