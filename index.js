@@ -144,6 +144,110 @@ export function resolveUploadLimits(configured = {}) {
   return limits;
 }
 
+/** Display name of a middleware entry: 'AuthMiddleware', a function/class name, or 'anonymous'. */
+function middlewareName(entry) {
+  if (typeof entry === 'string') return entry;
+  if (typeof entry === 'function') return entry.name || 'anonymous';
+  if (entry && typeof entry === 'object') {
+    const ctor = entry.constructor;
+    return ctor && ctor !== Object && ctor.name ? ctor.name : 'anonymous';
+  }
+  return String(entry);
+}
+
+const PARAM_NAME = /^[$_\p{ID_Start}][$‌‍\p{ID_Continue}]*/u;
+
+/**
+ * @private Parse an Express 5 (path-to-regexp 8) path into tokens:
+ * `{ text }`, `{ param, wildcard }` and `{ group: tokens }` for `{optional}` parts.
+ */
+function parsePath(input) {
+  let i = 0;
+  const readName = () => {
+    if (input[i] === '"') {
+      let name = '';
+      i += 1;
+      while (i < input.length && input[i] !== '"') {
+        if (input[i] === '\\') i += 1;
+        name += input[i] ?? '';
+        i += 1;
+      }
+      i += 1;
+      return name;
+    }
+    const m = PARAM_NAME.exec(input.slice(i));
+    if (!m) throw new Error(`missing parameter name at index ${i} in "${input}"`);
+    i += m[0].length;
+    return m[0];
+  };
+  const parse = (closing) => {
+    const tokens = [];
+    let text = '';
+    const flush = () => { if (text) { tokens.push({ text }); text = ''; } };
+    while (i < input.length) {
+      const ch = input[i];
+      if (ch === '\\') { text += input[i + 1] ?? ''; i += 2; continue; }
+      if (ch === '}' && closing) { i += 1; flush(); return tokens; }
+      if (ch === '{') { i += 1; flush(); tokens.push({ group: parse(true) }); continue; }
+      if (ch === ':' || ch === '*') {
+        i += 1;
+        flush();
+        tokens.push({ param: readName(), wildcard: ch === '*' });
+        continue;
+      }
+      text += ch;
+      i += 1;
+    }
+    if (closing) throw new Error(`unterminated "{" in "${input}"`);
+    flush();
+    return tokens;
+  };
+  return parse(false);
+}
+
+/** @private every variant of a token list, optional groups present or absent. */
+function expandTokens(tokens) {
+  let variants = [[]];
+  for (const token of tokens) {
+    if (token.group) {
+      const inner = expandTokens(token.group);
+      variants = variants.flatMap((v) => [v, ...inner.map((g) => [...v, ...g])]);
+    } else {
+      variants = variants.map((v) => [...v, token]);
+    }
+  }
+  return variants;
+}
+
+/**
+ * Convert an Express 5 path to OpenAPI path templates. `:id` and `*path`
+ * become `{id}` / `{path}`; a path with optional groups (`/files{/:name}`)
+ * gives one template per variant, shortest first.
+ *
+ * @param {string} expressPath
+ * @returns {Array<{ path: string, params: Array<{ name: string, wildcard: boolean }> }>}
+ */
+export function toOpenApiPaths(expressPath) {
+  const seen = new Set();
+  const out = [];
+  for (const variant of expandTokens(parsePath(String(expressPath)))) {
+    let p = '';
+    const params = [];
+    for (const token of variant) {
+      if (token.text !== undefined) p += token.text;
+      else {
+        p += `{${token.param}}`;
+        params.push({ name: token.param, wildcard: token.wildcard });
+      }
+    }
+    p = normalizePath(p);
+    if (seen.has(p)) continue;
+    seen.add(p);
+    out.push({ path: p, params });
+  }
+  return out;
+}
+
 export class AveroaRouter {
   constructor() {
     /** App-relative folders and the middleware method name (see config()). */
@@ -165,6 +269,8 @@ export class AveroaRouter {
 
     this.router = null;
     this.initPromise = null;
+    /** Route metadata built by init(), returned by describe(). */
+    this.descriptions = [];
     this.moduleCache = new Map();
     /** One instance per class per router (key: the class itself). */
     this.instanceCache = new Map();
@@ -342,8 +448,56 @@ export class AveroaRouter {
       // Upload folder name used by the model hooks: the full prefix without slashes.
       pref: prefix.split('/').join(''),
       form,
+      doc: null,
     });
     return this;
+  }
+
+  /**
+   * Attach API documentation to the route defined just before:
+   *
+   *   router.post('/auth/login', 'AuthController@login').doc({ summary: 'Log in', tags: ['Auth'] });
+   *
+   * The object is stored as is (several calls are merged) and returned by
+   * describe(); @averoa/core reads `summary`, `description`, `tags`,
+   * `operationId`, `deprecated`, `security`, `request`, `responses` and
+   * `exclude` from it when it builds the OpenAPI document.
+   *
+   * @param {object} meta
+   * @returns {this}
+   */
+  doc(meta) {
+    if (this.initPromise) throw new Error('[@averoa/routes] cannot call doc() after init()');
+    if (!meta || typeof meta !== 'object' || Array.isArray(meta)) {
+      throw new TypeError('[@averoa/routes] doc() expects an object ({ summary, tags, request, responses, ... })');
+    }
+    const route = this.routes[this.routes.length - 1];
+    if (!route) throw new Error('[@averoa/routes] doc() must follow a route definition (router.get(...).doc({...}))');
+    route.doc = { ...(route.doc ?? {}), ...meta };
+    return this;
+  }
+
+  /**
+   * Metadata of every registered route, available once init() has resolved:
+   * one entry per verb and path variant, in registration order.
+   *
+   * @returns {Array<{
+   *   method: string, path: string, openapiPath: string,
+   *   params: Array<{ name: string, wildcard: boolean }>,
+   *   handler: string, middleware: string[], middlewareEntries: Array<string|Function|object>,
+   *   model: string|null, modelClass: Function|null, hooks: string[], form: boolean, doc: object|null
+   * }>}
+   */
+  describe() {
+    if (!this.router) throw new Error('[@averoa/routes] describe() is available once init() has resolved');
+    return this.descriptions.map((d) => ({
+      ...d,
+      params: d.params.map((p) => ({ ...p })),
+      middleware: [...d.middleware],
+      middlewareEntries: [...d.middlewareEntries],
+      hooks: [...d.hooks],
+      doc: d.doc ? { ...d.doc } : null,
+    }));
   }
 
   // ---------------------------------------------------------------- init
@@ -372,7 +526,10 @@ export class AveroaRouter {
   async build() {
     const router = express.Router();
     const upload = this.createUpload();
-    const { beginning, end } = await this.resolveGlobalMiddleware();
+    const {
+      beginning, end, beginningEntries, endEntries,
+    } = await this.resolveGlobalMiddleware();
+    const descriptions = [];
 
     for (const route of this.routes) {
       const middleware = [];
@@ -401,9 +558,35 @@ export class AveroaRouter {
             { cause },
           );
         }
+
+        const entries = [...beginningEntries, ...route.middleware, ...endEntries];
+        let variants;
+        try {
+          variants = toOpenApiPaths(route.path);
+        } catch {
+          // documentation only: never fail init() over a path Express accepted
+          variants = [{ path: route.path.replace(/[:*]([\w$]+)/g, '{$1}'), params: [] }];
+        }
+        for (const variant of variants) {
+          descriptions.push({
+            method: verb,
+            path: route.path,
+            openapiPath: variant.path,
+            params: variant.params,
+            handler: typeof route.handler === 'string' ? route.handler : (route.handler.name || 'anonymous'),
+            middleware: entries.map(middlewareName),
+            middlewareEntries: entries,
+            model: route.model,
+            modelClass: model,
+            hooks: model ? hooksFor(verb) : [],
+            form: route.form,
+            doc: route.doc,
+          });
+        }
       }
     }
 
+    this.descriptions = descriptions;
     this.router = router;
     return router;
   }
@@ -547,6 +730,7 @@ export class AveroaRouter {
       provider = new provider();
     }
 
+    const entries = { beginning: [], end: [] };
     const collect = async (kind) => {
       // beginning()/end() may be sync or async and may return undefined
       const list = typeof provider?.[kind] === 'function' ? await provider[kind]() : undefined;
@@ -556,10 +740,16 @@ export class AveroaRouter {
       const out = [];
       for (const entry of list ?? []) {
         out.push(await this.resolveMiddleware(entry, `MiddlewareProvider.${kind}()`, 'handle'));
+        entries[kind].push(entry);
       }
       return out;
     };
-    return { beginning: await collect('beginning'), end: await collect('end') };
+    return {
+      beginning: await collect('beginning'),
+      end: await collect('end'),
+      beginningEntries: entries.beginning,
+      endEntries: entries.end,
+    };
   }
 }
 

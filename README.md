@@ -28,6 +28,7 @@
 - [Configuration](#configuration)
 - [Scopes](#scopes)
 - [Paths and Express 5 syntax](#paths-and-express-5-syntax)
+- [Route metadata and documentation](#route-metadata-and-documentation)
 - [Testing](#testing)
 - [Upgrading from 2.x](#upgrading-from-2x)
 - [Related packages](#related-packages)
@@ -191,6 +192,7 @@ import Router, {
   DEFAULT_MAX_FILE_SIZE,
   DEFAULT_UPLOAD_LIMITS,
   resolveUploadLimits,
+  toOpenApiPaths,
 } from '@averoa/routes';
 ```
 
@@ -201,6 +203,7 @@ import Router, {
 | `DEFAULT_MAX_FILE_SIZE` | `number` | `10485760` (10 MB), the default `fileSize` limit for `*Form` routes. |
 | `DEFAULT_UPLOAD_LIMITS` | frozen object | `{ fileSize: 10485760, files: 10, fields: 100, fieldSize: 1048576 }` |
 | `resolveUploadLimits(configured?)` | `(object) => object` | Returns the multer limits a `*Form` route would use. See [Uploads](#uploads). |
+| `toOpenApiPaths(path)` | `(string) => Array<{ path, params }>` | Converts an Express 5 path to OpenAPI path templates. See [Route metadata and documentation](#route-metadata-and-documentation). |
 
 Each call to `Router()` returns an independent definition with its own routes, configuration and caches.
 
@@ -310,6 +313,12 @@ All messages start with `[@averoa/routes]`. For global middleware the route is s
 `MiddlewareProvider.beginning()` or `MiddlewareProvider.end()`. For an invalid path the message names the verb, the
 full path and the handler (a `'Controller@method'` string, `function <name>` or `anonymous function`); see
 [Paths and Express 5 syntax](#paths-and-express-5-syntax).
+
+### doc(meta) and describe()
+
+`doc(meta)` attaches API documentation to the route declared just before it and returns the router;
+`describe()` returns the metadata of every route once `init()` has resolved. See
+[Route metadata and documentation](#route-metadata-and-documentation).
 
 ### Properties
 
@@ -620,6 +629,78 @@ message, and keeps the error thrown by Express on `err.cause`:
 ```
 
 See the [Express 5 migration guide](https://expressjs.com/en/guide/migrating-5.html) for the full list of path changes.
+
+## Route metadata and documentation
+
+### describe()
+
+```ts
+describe(): Array<RouteDescription>
+```
+
+Once `init()` has resolved, `describe()` returns one entry per verb (and per path variant, see below), in
+registration order. It is what `@averoa/core` uses to build the OpenAPI document; it is also handy for route listings
+and tests. Calling it before `init()` has resolved throws. Every call returns fresh copies.
+
+```js
+await router.init();
+router.describe();
+// [{
+//   method: 'put',
+//   path: '/teachers/:id',
+//   openapiPath: '/teachers/{id}',
+//   params: [{ name: 'id', wildcard: false }],
+//   handler: 'TeacherController@update',
+//   middleware: ['AuthMiddleware'],
+//   middlewareEntries: ['AuthMiddleware'],
+//   model: 'Teacher',
+//   modelClass: [class Teacher],
+//   hooks: ['checkParamId', 'validationRouter', 'mapRequest'],
+//   form: false,
+//   doc: null,
+// }, ...]
+```
+
+| Field | Description |
+| --- | --- |
+| `method` | Lower-case verb (`get`, `post`, ..., or `all` for `all()`). |
+| `path` | Full Express path, prefixes included (relative to where the router is mounted, e.g. without `/api`). |
+| `openapiPath` | The same path as an OpenAPI template (`{id}`). |
+| `params` | Path parameters of `openapiPath`; `wildcard` is `true` for `*name` parameters. |
+| `handler` | `'Controller@method'`, the function's name, or `'anonymous'`. |
+| `middleware` | Names of the whole middleware chain in run order: `MiddlewareProvider.beginning()`, scope and route middleware, `MiddlewareProvider.end()`. A string entry is its own name; a function or class gives its `name`; an object its constructor's name; otherwise `'anonymous'`. |
+| `middlewareEntries` | The same chain as declared (strings, functions, objects), e.g. to read metadata a middleware function carries. |
+| `model`, `modelClass` | The `crud()` model name and the resolved class, or `null`. |
+| `hooks` | Model hooks run for this verb (`[]` outside `crud()`). |
+| `form` | `true` for `postForm` / `putForm` / `patchForm` (multipart). |
+| `doc` | The object given to `doc()`, or `null`. |
+
+### doc(meta)
+
+Chain `doc()` after a route to attach documentation. It applies to the route declared just before it; several calls
+merge. It doesn't change routing, and calling it before any route or after `init()` throws.
+
+```js
+router.post('/auth/login', 'AuthController@login').doc({
+  summary: 'Log in with email and password',
+  tags: ['Auth'],
+  responses: { 401: { description: 'Invalid email or password' } },
+});
+```
+
+The router stores the object as is. `@averoa/core` reads `summary`, `description`, `tags`, `operationId`,
+`deprecated`, `security`, `request`, `responses` and `exclude` from it; see its README for the meaning of each key.
+
+### OpenAPI paths
+
+`toOpenApiPaths(path)` (also used by `describe()`) converts Express 5 syntax: `:id` and `:"quoted-name"` become
+`{id}`, a wildcard `*path` becomes `{path}` (flagged `wildcard: true`), escaped characters (`\\:`) are kept literally.
+OpenAPI has no optional path segments, so each `{optional}` group gives two variants, shortest first:
+
+```js
+toOpenApiPaths('/files{/:name}');
+// [{ path: '/files', params: [] }, { path: '/files/{name}', params: [{ name: 'name', wildcard: false }] }]
+```
 
 ## Testing
 

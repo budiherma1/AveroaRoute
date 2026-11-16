@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **`router.describe()`**: route metadata once `init()` has resolved: one entry per verb with the method, the full
+  Express path and its OpenAPI template (`/teachers/{id}`), path parameters, the handler name, the names of the whole
+  middleware chain (`MiddlewareProvider` beginning/end included) and the declared entries, the `crud()` model name and
+  class, the model hooks, the multipart flag and the route's documentation.
+- **`.doc(meta)`**: attach API documentation (`summary`, `tags`, `request`, `responses`, ...) to the route declared
+  just before it: `router.post('/login', 'AuthController@login').doc({ summary: 'Log in' })`. Routing is unchanged
+  and every existing call keeps working.
+- **`toOpenApiPaths(path)`**: converts Express 5 paths (`:id`, `*splat`, `:"quoted"`, `{optional}` groups) to
+  OpenAPI path templates.
+
 ## 3.0.1
 
 ### Fixed
