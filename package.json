@@ -1,18 +1,48 @@
 {
   "name": "@averoa/routes",
-  "version": "2.0.1",
-  "description": "routes for averoajs",
-  "main": "index.js",
+  "version": "3.0.0",
+  "description": "Laravel-style routes (controllers, middleware, groups, crud model hooks) for AveroaJS on express 5",
   "type": "module",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./package.json": "./package.json"
   },
+  "files": [
+    "index.js",
+    "README.md",
+    "CHANGELOG.md"
+  ],
+  "scripts": {
+    "pretest": "node test/link-utilities.js",
+    "test": "node --test test/*.test.js"
+  },
+  "engines": {
+    "node": ">=18.17"
+  },
+  "dependencies": {
+    "multer": "^2.0.2"
+  },
+  "peerDependencies": {
+    "@averoa/utilities": "^2.0.0",
+    "express": "^5.1.0"
+  },
+  "devDependencies": {
+    "express": "^5.1.0"
+  },
+  "keywords": [
+    "averoa",
+    "averoajs",
+    "express",
+    "router",
+    "routes"
+  ],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/budiherma1/AveroaRoute.git"
   },
   "author": "",
-  "license": "ISC",
+  "license": "MIT",
   "bugs": {
     "url": "https://github.com/budiherma1/AveroaRoute/issues"
   },
